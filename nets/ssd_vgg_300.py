@@ -93,19 +93,12 @@ class SSDNet(object):
     """
     default_params = SSDParams(
         img_shape=(300, 300),
-        num_classes=21,
-        no_annotation_label=21,
-        #得到feature map的层数，及feature map的shape
+        num_classes=2,
+        no_annotation_label=2,
         feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11'],
         feat_shapes=[(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
-        #对size的约束
-        #论文中，S_k=S_min+(S_max-S_min)*(k-1)/(m-1),代码中为固定值21，45，99，153，207，261
-        # anchor_size_bounds=[0.20, 0.90],
-        
-        #通过size和ritio可得到default boxes的W和H:
-        #W=S_k*sqr(R),H=S_k/sqr(R)
-        #加上W=H=sqr(S_k*S_(k+1))
         anchor_size_bounds=[0.15, 0.90],
+        # anchor_size_bounds=[0.20, 0.90],
         anchor_sizes=[(21., 45.),
                       (45., 99.),
                       (99., 153.),
@@ -124,9 +117,7 @@ class SSDNet(object):
                        [2, .5, 3, 1./3],
                        [2, .5],
                        [2, .5]],
-        #将feature map还原到原图（300*300）的比例
         anchor_steps=[8, 16, 32, 64, 100, 300],
-        #定位到网格中心的偏置
         anchor_offset=0.5,
         normalizations=[20, -1, -1, -1, -1, -1],
         prior_scaling=[0.1, 0.1, 0.2, 0.2]
@@ -151,7 +142,6 @@ class SSDNet(object):
             scope='ssd_300_vgg'):
         """SSD network definition.
         """
-        #r[0]为predictions,r[1]为localisations
         r = ssd_net(inputs,
                     num_classes=self.params.num_classes,
                     feat_layers=self.params.feat_layers,
@@ -169,7 +159,6 @@ class SSDNet(object):
             self.params = self.params._replace(feat_shapes=shapes)
         return r
 
-    #预设网络公用的参数
     def arg_scope(self, weight_decay=0.0005, data_format='NHWC'):
         """Network arg_scope.
         """
@@ -187,8 +176,7 @@ class SSDNet(object):
         """
         shapes = ssd_feat_shapes_from_net(predictions, self.params.feat_shapes)
         self.params = self.params._replace(feat_shapes=shapes)
-    
-    #找出所有anchors
+
     def anchors(self, img_shape, dtype=np.float32):
         """Compute the default anchor boxes, given an image shape.
         """
@@ -199,7 +187,7 @@ class SSDNet(object):
                                       self.params.anchor_steps,
                                       self.params.anchor_offset,
                                       dtype)
-    #通过ssd_common对坐标进行编码
+
     def bboxes_encode(self, labels, bboxes, anchors,
                       scope=None):
         """Encode labels and bounding boxes.
@@ -211,7 +199,7 @@ class SSDNet(object):
             ignore_threshold=0.5,
             prior_scaling=self.params.prior_scaling,
             scope=scope)
-    #通过ssd_common对坐标进行解码
+
     def bboxes_decode(self, feat_localizations, anchors,
                       scope='ssd_bboxes_decode'):
         """Encode labels and bounding boxes.
@@ -220,27 +208,20 @@ class SSDNet(object):
             feat_localizations, anchors,
             prior_scaling=self.params.prior_scaling,
             scope=scope)
-    
-    #通过ssd_common选取合适的anchors
+
     def detected_bboxes(self, predictions, localisations,
                         select_threshold=None, nms_threshold=0.5,
                         clipping_bbox=None, top_k=400, keep_top_k=200):
         """Get the detected bounding boxes from the SSD network output.
         """
-        #通过SSD网络，得到检测到的bbox
-        
         # Select top_k bboxes from predictions, and clip
-        #选取top_k=400个框，并对框做修建（超出原图尺寸范围的切掉） 
-        #得到对应某个类别的得分值以及bbox  
         rscores, rbboxes = \
             ssd_common.tf_ssd_bboxes_select(predictions, localisations,
                                             select_threshold=select_threshold,
                                             num_classes=self.params.num_classes)
-        #按照得分高低，筛选出400个bbox和对应得分  
         rscores, rbboxes = \
             tfe.bboxes_sort(rscores, rbboxes, top_k=top_k)
         # Apply NMS algorithm.
-        #应用非极大值抑制，筛选掉与得分最高bbox重叠率大于0.5的，保留200个  
         rscores, rbboxes = \
             tfe.bboxes_nms_batch(rscores, rbboxes,
                                  nms_threshold=nms_threshold,
@@ -321,7 +302,7 @@ def ssd_feat_shapes_from_net(predictions, default_shapes=None):
             feat_shapes.append(shape)
     return feat_shapes
 
-#得到每个feature map中的点在原图中对应的坐标，和原图中其Scale对应的 DF_Box
+
 def ssd_anchor_one_layer(img_shape,
                          feat_shape,
                          sizes,
@@ -336,9 +317,8 @@ def ssd_anchor_one_layer(img_shape,
 
     Arguments:
       feat_shape: Feature shape, used for computing relative position grids;
-      sizes: scale #Absolute reference sizes;
+      size: Absolute reference sizes;
       ratios: Ratios to use on these features;
-      step:从feature map还原到原图的比例
       img_shape: Image shape, used for computing height, width relatively to the
         former;
       offset: Grid offset.
@@ -351,12 +331,8 @@ def ssd_anchor_one_layer(img_shape,
     # y = (y.astype(dtype) + offset) / feat_shape[0]
     # x = (x.astype(dtype) + offset) / feat_shape[1]
     # Weird SSD-Caffe computation using steps values...
-    
-    #生成网格的左上角坐标，与feature map shape相匹配（覆盖整个feature map）
-    y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]   
-    
-    #加上偏移后得到网格的中心坐标，根据其得到default box映射到原图中的坐标，并将其归一化
-    y = (y.astype(dtype) + offset) * step / img_shape[0]  
+    y, x = np.mgrid[0:feat_shape[0], 0:feat_shape[1]]
+    y = (y.astype(dtype) + offset) * step / img_shape[0]
     x = (x.astype(dtype) + offset) * step / img_shape[1]
 
     # Expand dims to support easy broadcasting.
@@ -365,30 +341,20 @@ def ssd_anchor_one_layer(img_shape,
 
     # Compute relative height and width.
     # Tries to follow the original implementation of SSD for the order.
-    
-    #每个feature map上default boxes的数量为 2+len(ratios)
     num_anchors = len(sizes) + len(ratios)
     h = np.zeros((num_anchors, ), dtype=dtype)
     w = np.zeros((num_anchors, ), dtype=dtype)
     # Add first anchor boxes with ratio=1.
-    
-    #ratio=1时的两个default boxes
-    #W=H=S_k
-    #W=H=sqr(S_k*S_(k+1))
-    h[0] = sizes[0] / img_shape[0]  #sizes[0]即这个feature map的scale
+    h[0] = sizes[0] / img_shape[0]
     w[0] = sizes[0] / img_shape[1]
     di = 1
     if len(sizes) > 1:
         h[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[0]
         w[1] = math.sqrt(sizes[0] * sizes[1]) / img_shape[1]
         di += 1
-    
-    #ratio!=1时的default boxes
-    #返回不同ratio对应的长和宽：W=S_k*sqr(R),H=S_k/sqr(R)
     for i, r in enumerate(ratios):
         h[i+di] = sizes[0] / img_shape[0] / math.sqrt(r)
         w[i+di] = sizes[0] / img_shape[1] * math.sqrt(r)
-    #返回所有网格的中心坐标在原图中对应的x和y，以及对应的原图中default boxes的W和H
     return y, x, h, w
 
 
@@ -402,9 +368,6 @@ def ssd_anchors_all_layers(img_shape,
     """Compute anchor boxes for all feature layers.
     """
     layers_anchors = []
-    #对feature map中的每个点，将其中心位置按比例映射到原图坐标
-    #每个feature map对应一个Scale，以不同的ratio，在原图中设置DF_Box
-    #得到每个feature map中的点在原图中对应的坐标，和原图中其Scale对应的 DF_Box
     for i, s in enumerate(layers_shape):
         anchor_bboxes = ssd_anchor_one_layer(img_shape, s,
                                              anchor_sizes[i],
@@ -427,7 +390,6 @@ def tensor_shape(x, rank=3):
         integers,otherwise they are integer scalar tensors.
     """
     if x.get_shape().is_fully_defined():
-        #将x的形状从(6，4)转化为list格式[]
         return x.get_shape().as_list()
     else:
         static_shape = x.get_shape().with_rank(rank).as_list()
@@ -435,7 +397,7 @@ def tensor_shape(x, rank=3):
         return [s if s is not None else d
                 for s, d in zip(static_shape, dynamic_shape)]
 
-#得到输入的网络对应的pediction和location
+
 def ssd_multibox_layer(inputs,
                        num_classes,
                        sizes,
@@ -445,42 +407,28 @@ def ssd_multibox_layer(inputs,
     """Construct a multibox layer, return a class and localization predictions.
     """
     net = inputs
-    #如果normalization > 0，则对input进行L2正则化
     if normalization > 0:
         net = custom_layers.l2_normalization(net, scaling=True)
     # Number of anchors.
-    #每层特征图参考先验框的个数[4,6,6,6,4,4]
     num_anchors = len(sizes) + len(ratios)
 
     # Location.
-    #每个框需要预测四个值
     num_loc_pred = num_anchors * 4
-    #在原网络后加一个3*3的卷积层，kernel number = num_anchors * 4
-    #卷积后的每个点为feat_layers每个cell的预测结果
     loc_pred = slim.conv2d(net, num_loc_pred, [3, 3], activation_fn=None,
                            scope='conv_loc')
-    #将数据格式调整为'NHWC'-[batch, in_height, in_width, in_channels]
     loc_pred = custom_layers.channel_to_last(loc_pred)
-    #最后整个特征图所有锚点框预测目标位置 tensor为[h,w,每个cell先验框数，4]   [1,38,38,4,4] 
-    #loc_pred.shape:(1, 38, 38, 16)
     loc_pred = tf.reshape(loc_pred,
                           tensor_shape(loc_pred, 4)[:-1]+[num_anchors, 4])
-    #loc_pred.shape:(1, 38, 38, 4, 4)
-    #print("loc_pred.shape2:",loc_pred.shape)
-    
     # Class prediction.
-    #每个框需要对每个类别进行预测
     num_cls_pred = num_anchors * num_classes
-    #在原网络后加一个3*3的卷积层，kernel number = num_anchors * num_classes
     cls_pred = slim.conv2d(net, num_cls_pred, [3, 3], activation_fn=None,
                            scope='conv_cls')
     cls_pred = custom_layers.channel_to_last(cls_pred)
-    #最后整个特征图所有锚点框预测类别 tensor为[h,w*,每个cell先验框数，种类数]   [1,38,38,4,10]
     cls_pred = tf.reshape(cls_pred,
                           tensor_shape(cls_pred, 4)[:-1]+[num_anchors, num_classes])
     return cls_pred, loc_pred
 
-    #模型的网络结构
+
 def ssd_net(inputs,
             num_classes=SSDNet.default_params.num_classes,
             feat_layers=SSDNet.default_params.feat_layers,
@@ -519,7 +467,6 @@ def ssd_net(inputs,
         # Block 5.
         net = slim.repeat(net, 3, slim.conv2d, 512, [3, 3], scope='conv5')
         end_points['block5'] = net
-        #之前为19*19，该max_pool2d padding=valid, 则经过maxpooling变为17*17
         net = slim.max_pool2d(net, [3, 3], stride=1, scope='pool5')
 
         # Additional SSD blocks.
@@ -560,26 +507,23 @@ def ssd_net(inputs,
         predictions = []
         logits = []
         localisations = []
-        #i,layer分别为index和feat_layers=['block4', 'block7', 'block8', 'block9', 'block10', 'block11']
         for i, layer in enumerate(feat_layers):
             with tf.variable_scope(layer + '_box'):
-                #返回在每个feature map上对类别和位置的预测结果
-                p, l = ssd_multibox_layer(end_points[layer],       #为feat_layers层之前的网络
+                p, l = ssd_multibox_layer(end_points[layer],
                                           num_classes,
                                           anchor_sizes[i],
                                           anchor_ratios[i],
                                           normalizations[i])
-            #prediction_fn=slim.softmax，找到所有框的所有类别置信度
             predictions.append(prediction_fn(p))
             logits.append(p)
             localisations.append(l)
+
         return predictions, localisations, logits, end_points
-    
 ssd_net.default_image_size = 300
 
-#预设网络公用的参数
+
 def ssd_arg_scope(weight_decay=0.0005, data_format='NHWC'):
-    """Definese VGG arg scope.
+    """Defines the VGG arg scope.
 
     Args:
       weight_decay: The l2 regularization coefficient.
@@ -630,8 +574,6 @@ def ssd_arg_scope_caffe(caffe_scope):
 
 # =========================================================================== #
 # SSD loss function.
-#损失函数定义为位置误差和置信度误差的加权和；
-#参数：每一个anchors预测的类别得分、预测的位置偏移量、真实类别、真实位置、真实得分
 # =========================================================================== #
 def ssd_losses(logits, localisations,
                gclasses, glocalisations, gscores,
@@ -642,33 +584,23 @@ def ssd_losses(logits, localisations,
                device='/cpu:0',
                scope=None):
     with tf.name_scope(scope, 'ssd_losses'):
-        #lshape=(1,38,38,4,21)
         lshape = tfe.get_shape(logits[0], 5)
-        #num_classes=21
         num_classes = lshape[-1]
-        #batch_size
         batch_size = lshape[0]
 
-        #平齐所有向量
+        # Flatten out all vectors!
         flogits = []
         fgclasses = []
         fgscores = []
         flocalisations = []
         fglocalisations = []
-        #len(logits)=6 feature map数量
         for i in range(len(logits)):
-            #将预测的类别得分reshape成（-1,21）
-            flogits.append(tf.reshape(logits[i], [-1, num_classes]))  
-            #真实的类别
+            flogits.append(tf.reshape(logits[i], [-1, num_classes]))
             fgclasses.append(tf.reshape(gclasses[i], [-1]))
-            #真实的类别得分
             fgscores.append(tf.reshape(gscores[i], [-1]))
-            #将预测的边框坐标（编码形式的值） reshape成（-1,4） 
             flocalisations.append(tf.reshape(localisations[i], [-1, 4]))
-            #用于将真实的边框坐标进行编码存储  
             fglocalisations.append(tf.reshape(glocalisations[i], [-1, 4]))
-        #将所有feature map的数据按行连接起来（叠放在列上），如flogits，从6*[-1,21]，变为[-1,21] （行数增多）
-        #每一行数据包含一个anchor的信息：logits-预测的类别得分(21)，gclasses-真实的类别(1)，gscores-真实的类别得分(1)，localisations-预测的位置偏移(4)，glocalisations-真实的位置偏移(4)
+        # And concat the crap!
         logits = tf.concat(flogits, axis=0)
         gclasses = tf.concat(fgclasses, axis=0)
         gscores = tf.concat(fgscores, axis=0)
@@ -684,32 +616,31 @@ def ssd_losses(logits, localisations,
         fpmask = tf.cast(pmask, dtype)
         #求 pmask=1的数量（作为正样本数量）
         n_positives = tf.reduce_sum(fpmask)
-
-        # Hard negative mining...
-        # Hard negative mining... 为了保证正负样本尽量平衡，SSD采用了hard negative mining，就是对负样本进行抽样，抽样时按照置信度误差（预测背景的置信度越小，误差越大）进行降序排列，选取误差的较大的top-k作为训练的负样本，以保证正负样本比例接近1:3  
         #no_classes：gscores>0.5, pmask=1 ；否则pmask=0
-        # no_classes=1为正样本（正样本有物体，负样本为背景 ）
+        #no_classes=1为正样本（正样本有物体，负样本为背景）
         no_classes = tf.cast(pmask, tf.int32)
-        #predictions：预测为每个类别的概率
-        predictions = slim.softmax(logits)
-        #-0.5<gscore<0.5时nmask=True，代表负样本
-        nmask = tf.logical_and(tf.logical_not(pmask),
-                               gscores > -0.5)
-        #-0.5<gscore<0.5时fnmask=1，代表负样本
+        
+        # 负样本选择：Hard negative mining...
+        # Hard negative mining... 为了保证正负样本尽量平衡，SSD采用了hard negative mining，就是对负样本进行抽样，抽样时按照置信度误差（预测背景的置信度越小，误差越大）进行降序排列，选取误差的较大的top-k作为训练的负样本，以保证正负样本比例接近1:3  
+        #-0.5<gscore<0.5时nmask=True，代表负样本。
+        nmask = tf.logical_and(tf.logical_not(pmask),gscores > -0.5)
+        #负样本时fnmask=1，正样本处fnmask=0
         fnmask = tf.cast(nmask, dtype)
         #tf.where(input, a,b)，其中a，b均为尺寸一致的tensor。
         #作用是将a中对应input中true的位置的元素值不变，其余元素进行替换，替换成b中对应位置的元素值
-        #即当nmask=0时(gscores>0.5),将(正样本)对应的predictions[0]替换成1。将新的predictions[0]作为nvalues。
-        nvalues = tf.where(nmask,
-                           predictions[:, 0],
-                           1. - fnmask)
+        
+        #predictions：预测为每个类别的概率
+        predictions = slim.softmax(logits)
+        #将nvalues中判断为背景的位置，替换为预测为背景的得分。其他位置替换为1.
+        nvalues = tf.where(nmask,predictions[:, 0],1. - fnmask)
         #将所有框的预测类别为背景的概率排成一行，保存在nvalues_flat中（其中正样本对应的概率为1）
         nvalues_flat = tf.reshape(nvalues, [-1])
+        
         # Number of negative entries to select.
         #计算全部的负样本数量
         max_neg_entries = tf.cast(tf.reduce_sum(fnmask), tf.int32)
         #负样本数量是正样本数量的3倍+batch_size  
-        n_neg = tf.cast(negative_ratio * n_positives, tf.int32) + batch_size
+        n_neg = tf.cast(negative_ratio * n_positives, tf.int32)
         #如果全部的负样本数量小于n_neg，则n_neg等于全部的负样本数量
         n_neg = tf.minimum(n_neg, max_neg_entries)
         
@@ -718,42 +649,36 @@ def ssd_losses(logits, localisations,
         #负样本背景置信度最大值（背景置信度小于该阈值为负样本）
         max_hard_pred = -val[-1]
         # Final negative mask.
-        #-0.5<gscore<0.5,且nvalues<阈值，代表负样本
+        #-0.5<gscore<0.5(真实是背景),且nvalues<阈值(预测为背景的分数低于阈值)，代表负样本
         nmask = tf.logical_and(nmask, nvalues < max_hard_pred)
         #负样本fnmask从True转化为1
         fnmask = tf.cast(nmask, dtype)
 
-        # Add cross-entropy loss.#交叉熵
-        #正样本误差：
+        n_negatives = tf.reduce_sum(fnmask)
+        #正样本和负样本的数量
+        fn_neg = tf.cast(n_negatives, tf.float32)
+          
+        # Add cross-entropy loss.
         with tf.name_scope('cross_entropy_pos'):
-            #类别置信度误差：已知对各个类别的预测得分和正确类别，通过学习让正确类别的得分尽可能大。  
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                   labels=gclasses)
-            #将正样本的置信度误差相加后除以batch-size  （通过fpmask对正样本进行筛选）
-            loss = tf.div(tf.reduce_sum(loss * fpmask), batch_size, name='value')
+            loss = tf.div(tf.reduce_sum(loss * fpmask), n_positives, name='value')
             tf.losses.add_loss(loss)
-        #负样本的误差
+        
         with tf.name_scope('cross_entropy_neg'):
-            #no_classes：背景为0，非背景为1
-            #类别置信度误差：已知背景与非背景的预测得分和分类，通过学习让识别为背景的能力变强。
             loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits,
                                                                   labels=no_classes)
-            #将负样本（背景）的置信度误差相加后除以batch-size （通过fnmask对正样本进行筛选） 
-            loss = tf.div(tf.reduce_sum(loss * fnmask), batch_size, name='value')
+            loss = tf.div(tf.reduce_sum(loss * fnmask), fn_neg, name='value')
             tf.losses.add_loss(loss)
-
+             
         # Add localization loss: smooth L1, L2, ...
-        #位置误差
         with tf.name_scope('localization'):
             # Weights Tensor: positive mask + random negative.
             weights = tf.expand_dims(alpha * fpmask, axis=-1)
-            #先验框对应边界的位置预测值-真实位置；然后做Smooth L1 loss  
             loss = custom_layers.abs_smooth(localisations - glocalisations)
-            #将正样本的loss*alpha，求和后除以batch-size （通过fpmask对正样本进行筛选）
-            loss = tf.div(tf.reduce_sum(loss * weights), batch_size, name='value')
-            #获得置信度误差和位置误差的加权和  
+            loss = tf.div(tf.reduce_sum(loss * weights), n_positives, name='value')
             tf.losses.add_loss(loss)
-
+        
 
 def ssd_losses_old(logits, localisations,
                    gclasses, glocalisations, gscores,
@@ -784,7 +709,7 @@ def ssd_losses_old(logits, localisations,
                 dtype = logits[i].dtype
                 with tf.name_scope('block_%i' % i):
                     # Sizing weight...
-                    wsize = tf.get_shape(logits[i], rank=5)
+                    wsize = tfe.get_shape(logits[i], rank=5)
                     wsize = wsize[1] * wsize[2] * wsize[3]
 
                     # Positive mask.
