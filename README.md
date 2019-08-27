@@ -1,3 +1,15 @@
+# SSD-Tensrflow-learning
+
+这个版本为SSD的学习版本，以SSD代码为基础，学习现有目标检测算法的原理。
+
+包含SSD核心文件的代码注释，及SSD的原理介绍，相关知识点介绍。
+
+其中代码注释包括以下文件：
+train_ssd_network.ipynb、ssd_vgg_preprocessing.py、notebooks/ssd_notebook.ipynb、nets/ssd_vgg_300.py、nets/ssd_common.py、nets/np_methods.py、datasets/pascalvoc_to_tfrecords.py
+
+原理介绍与相关知识点介绍在 SSD原理.pdf中。
+
+
 # SSD: Single Shot MultiBox Detector in TensorFlow
 
 SSD is an unified framework for object detection with a single network. It has been originally introduced in this research [article](http://arxiv.org/abs/1512.02325).
