@@ -5,9 +5,9 @@
 包含SSD核心文件的代码注释，及SSD的原理介绍，相关知识点介绍。
 
 其中代码注释包括以下文件：
-train_ssd_network.ipynb、ssd_vgg_preprocessing.py、notebooks/ssd_notebook.ipynb、nets/ssd_vgg_300.py、nets/ssd_common.py、nets/np_methods.py、datasets/pascalvoc_to_tfrecords.py
+train_ssd_network.ipynb、notebooks/ssd_notebook.ipynb、preprocessing/ssd_vgg_preprocessing.py、datasets/pascalvoc_to_tfrecords.py、nets/ssd_vgg_300.py、nets/ssd_common.py、nets/np_methods.py
 
-原理介绍与相关知识点介绍在 SSD原理.pdf中。
+原理介绍与相关知识点介绍在 SSD原理.pdf 中。
 
 
 # SSD: Single Shot MultiBox Detector in TensorFlow
